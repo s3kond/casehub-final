@@ -51,7 +51,7 @@ export default function App() {
   const [activeCategory, setActiveCategory] = useState('All');
   const [selectedProduct, setSelectedProduct] = useState<any>(null);
 
-  const API_URL = 'https://clorinda-unshady-milly.ngrok-free.dev';
+const API_URL = 'https://casehub-server.onrender.com';
 
   // 1. Обновление товаров
   const refreshProducts = useCallback(async () => {
