@@ -10,14 +10,15 @@ require('dotenv').config();
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 const app = express();
 
-// --- НАСТРОЙКА CORS И СТАТИКИ ---
+// --- 0. НАСТРОЙКА CORS (ИСПРАВЛЕНО ДЛЯ VERCEL И АДМИНКИ) ---
 app.use(cors({
-    origin: '*', 
+    origin: ['https://casehub-final.vercel.app', 'http://localhost:5173'],
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'],
-    allowedHeaders: ['Content-Type', 'Authorization']
+    allowedHeaders: ['Content-Type', 'Authorization', 'ngrok-skip-browser-warning'],
+    credentials: true
 }));
 
-// Промежуточное ПО для логов (чтобы видеть запросы в Render)
+// Промежуточное ПО для логов
 app.use((req, res, next) => {
     console.log(`📡 [${req.method}] ${req.url}`);
     next();
@@ -33,7 +34,7 @@ const uploadDir = path.join(__dirname, 'uploads');
 if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir);
 app.use('/uploads', express.static(uploadDir));
 
-// --- ИНИЦИАЛИЗАЦИЯ БОТА ---
+// --- 1. ИНИЦИАЛИЗАЦИЯ БОТА ---
 const token = process.env.TELEGRAM_BOT_TOKEN;
 const bot = new TelegramBot(token, { polling: true });
 const adminId = process.env.ADMIN_CHAT_ID;
@@ -57,13 +58,13 @@ const sendAdminNotification = async (order, isUpdate = false) => {
     } catch (e) { console.error("Admin Notif Error:", e.message); }
 };
 
-// --- БАЗА ДАННЫХ ---
+// --- 2. БАЗА ДАННЫХ ---
 const pool = new Pool({ 
     connectionString: process.env.DATABASE_URL, 
     ssl: { rejectUnauthorized: false } 
 });
 
-// --- MULTER ДЛЯ ФОТО ---
+// --- 3. MULTER ДЛЯ ФОТО ---
 const storage = multer.diskStorage({
     destination: (req, file, cb) => cb(null, 'uploads/'),
     filename: (req, file, cb) => {
@@ -73,7 +74,7 @@ const storage = multer.diskStorage({
 });
 const upload = multer({ storage });
 
-// --- ВЕБХУК STRIPE ---
+// --- 4. ВЕБХУК STRIPE ---
 app.post('/api/webhook', express.raw({ type: 'application/json' }), async (req, res) => {
     const sig = req.headers['stripe-signature'];
     let event;
@@ -89,7 +90,7 @@ app.post('/api/webhook', express.raw({ type: 'application/json' }), async (req, 
     res.json({ received: true });
 });
 
-// --- API ЭНДПОИНТЫ (ТОВАРЫ) ---
+// --- 5. API ТОВАРЫ ---
 app.get('/api/products', async (req, res) => {
     try {
         const result = await pool.query('SELECT * FROM products ORDER BY id DESC');
@@ -105,27 +106,18 @@ app.post('/api/products', async (req, res) => {
              VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`, 
             [name, price_usd, stock || 0, images || [], categories || [], status || 'none', china_url]
         );
-        console.log("✅ Товар добавлен:", name);
         res.json(result.rows[0]);
-    } catch (err) { 
-        console.error("❌ Ошибка добавления:", err.message);
-        res.status(500).json({ error: err.message }); 
-    }
+    } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 app.delete('/api/products/:id', async (req, res) => {
     try {
-        const { id } = req.params;
-        await pool.query('DELETE FROM products WHERE id = $1', [id]);
-        console.log("🗑️ Товар удален, ID:", id);
+        await pool.query('DELETE FROM products WHERE id = $1', [req.params.id]);
         res.json({ success: true });
-    } catch (err) { 
-        console.error("❌ Ошибка удаления:", err.message);
-        res.status(500).json({ error: err.message }); 
-    }
+    } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// --- API ЭНДПОИНТЫ (ЮЗЕРЫ И ЗАКАЗЫ) ---
+// --- 6. API ЮЗЕРЫ И ЗАКАЗЫ ---
 app.post('/api/auth', async (req, res) => {
     try {
         const { id, username, first_name, photo_url } = req.body.user;
@@ -151,12 +143,21 @@ app.post('/api/orders', async (req, res) => {
     } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// Для пользователя
 app.get('/api/orders/:customer_id', async (req, res) => {
     const result = await pool.query('SELECT * FROM orders WHERE customer_id = $1 ORDER BY created_at DESC', [req.params.customer_id]);
     res.json(result.rows);
 });
 
-// --- СТРАЙП И ЗАГРУЗКА ---
+// Для админа (все заказы)
+app.get('/api/admin/orders', async (req, res) => {
+    try {
+        const result = await pool.query('SELECT * FROM orders ORDER BY created_at DESC');
+        res.json(result.rows);
+    } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// --- 7. СТРАЙП И ЗАГРУЗКА ---
 app.post('/api/create-checkout-session', async (req, res) => {
     try {
         const { items, customer_id, order_id } = req.body;
