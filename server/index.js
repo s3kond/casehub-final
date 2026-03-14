@@ -1,80 +1,28 @@
 const express = require('express');
 const { Pool } = require('pg');
 const cors = require('cors');
-const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 const TelegramBot = require('node-telegram-bot-api');
 require('dotenv').config();
-
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
+
 const app = express();
 
-// --- 0. НАСТРОЙКА CORS (ИСПРАВЛЕНО ДЛЯ VERCEL И АДМИНКИ) ---
+// 1. CORS - максимально разрешаем всё для Vercel
 app.use(cors({
-    origin: ['https://casehub-final.vercel.app', 'http://localhost:5173'],
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'ngrok-skip-browser-warning'],
-    credentials: true
+    origin: '*',
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'ngrok-skip-browser-warning']
 }));
 
-// Промежуточное ПО для логов
+// Логи запросов
 app.use((req, res, next) => {
     console.log(`📡 [${req.method}] ${req.url}`);
     next();
 });
 
-app.use(express.json({
-    verify: (req, res, buf) => {
-        if (req.originalUrl.startsWith('/api/webhook')) req.rawBody = buf;
-    }
-}));
-
-const uploadDir = path.join(__dirname, 'uploads');
-if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir);
-app.use('/uploads', express.static(uploadDir));
-
-// --- 1. ИНИЦИАЛИЗАЦИЯ БОТА ---
-const token = process.env.TELEGRAM_BOT_TOKEN;
-const bot = new TelegramBot(token, { polling: true });
-const adminId = process.env.ADMIN_CHAT_ID;
-
-bot.onText(/\/start/, (msg) => {
-    bot.sendMessage(msg.chat.id, `👋 **Welcome, ${msg.from.first_name}!**\n\nExplore CASEHUB — premium iPhone protection.`, {
-        parse_mode: 'Markdown',
-        reply_markup: { 
-            inline_keyboard: [[{ text: "🛍 Open Store", web_app: { url: "https://casehub-final.vercel.app" } }]] 
-        }
-    });
-});
-
-const sendAdminNotification = async (order, isUpdate = false) => {
-    if (!adminId) return;
-    try {
-        const items = typeof order.items === 'string' ? JSON.parse(order.items) : order.items;
-        const list = items.map(i => `• ${i.name || i.id} (x${i.quantity || i.q})`).join('\n');
-        const msg = `${isUpdate ? '✅ PAID' : '🆕 NEW'} #${order.id}\n👤 ${order.customer_name}\n📍 ${order.address}\n📦 Items:\n${list}\n💰 $${order.total_price}`;
-        bot.sendMessage(adminId, msg);
-    } catch (e) { console.error("Admin Notif Error:", e.message); }
-};
-
-// --- 2. БАЗА ДАННЫХ ---
-const pool = new Pool({ 
-    connectionString: process.env.DATABASE_URL, 
-    ssl: { rejectUnauthorized: false } 
-});
-
-// --- 3. MULTER ДЛЯ ФОТО ---
-const storage = multer.diskStorage({
-    destination: (req, file, cb) => cb(null, 'uploads/'),
-    filename: (req, file, cb) => {
-        const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-        cb(null, uniqueSuffix + path.extname(file.originalname));
-    }
-});
-const upload = multer({ storage });
-
-// --- 4. ВЕБХУК STRIPE ---
+// Вебхук Stripe должен быть ПЕРЕД express.json()
 app.post('/api/webhook', express.raw({ type: 'application/json' }), async (req, res) => {
     const sig = req.headers['stripe-signature'];
     let event;
@@ -84,83 +32,27 @@ app.post('/api/webhook', express.raw({ type: 'application/json' }), async (req, 
 
     if (event.type === 'checkout.session.completed') {
         const session = event.data.object;
-        const resUpd = await pool.query("UPDATE orders SET status = 'paid' WHERE id = $1 RETURNING *", [session.metadata.order_id]);
-        if (resUpd.rows[0]) sendAdminNotification(resUpd.rows[0], true);
+        await pool.query("UPDATE orders SET status = 'paid' WHERE id = $1", [session.metadata.order_id]);
+        console.log(`✅ Заказ #${session.metadata.order_id} помечен как оплаченный`);
     }
     res.json({ received: true });
 });
 
-// --- 5. API ТОВАРЫ ---
+app.use(express.json());
+
+const pool = new Pool({ connectionString: process.env.DATABASE_URL, ssl: { rejectUnauthorized: false } });
+const bot = new TelegramBot(process.env.TELEGRAM_BOT_TOKEN, { polling: true });
+
+// Эндпоинты
 app.get('/api/products', async (req, res) => {
-    try {
-        const result = await pool.query('SELECT * FROM products ORDER BY id DESC');
-        res.json(result.rows);
-    } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-app.post('/api/products', async (req, res) => {
-    try {
-        const { name, price_usd, stock, images, categories, status, china_url } = req.body;
-        const result = await pool.query(
-            `INSERT INTO products (name, price_usd, stock, images, categories, status, china_url) 
-             VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`, 
-            [name, price_usd, stock || 0, images || [], categories || [], status || 'none', china_url]
-        );
-        res.json(result.rows[0]);
-    } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-app.delete('/api/products/:id', async (req, res) => {
-    try {
-        await pool.query('DELETE FROM products WHERE id = $1', [req.params.id]);
-        res.json({ success: true });
-    } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-// --- 6. API ЮЗЕРЫ И ЗАКАЗЫ ---
-app.post('/api/auth', async (req, res) => {
-    try {
-        const { id, username, first_name, photo_url } = req.body.user;
-        const result = await pool.query(
-            `INSERT INTO users (tg_id, username, first_name, photo_url) VALUES ($1, $2, $3, $4) 
-             ON CONFLICT (tg_id) DO UPDATE SET username = $2, first_name = $3, photo_url = $4 RETURNING *`, 
-            [id, username, first_name, photo_url]
-        );
-        res.json(result.rows[0]);
-    } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-app.post('/api/orders', async (req, res) => {
-    try {
-        const { customer_id, customer_name, username, phone, address, items, total_price } = req.body;
-        const resOrd = await pool.query(
-            `INSERT INTO orders (customer_id, customer_name, username, phone, address, items, total_price, status) 
-             VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending') RETURNING *`,
-            [customer_id, customer_name, username || 'hidden', phone, address, JSON.stringify(items), total_price]
-        );
-        sendAdminNotification(resOrd.rows[0], false);
-        res.json(resOrd.rows[0]);
-    } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-// Для пользователя
-app.get('/api/orders/:customer_id', async (req, res) => {
-    const result = await pool.query('SELECT * FROM orders WHERE customer_id = $1 ORDER BY created_at DESC', [req.params.customer_id]);
+    const result = await pool.query('SELECT * FROM products ORDER BY id DESC');
     res.json(result.rows);
 });
 
-// Для админа (все заказы)
-app.get('/api/admin/orders', async (req, res) => {
-    try {
-        const result = await pool.query('SELECT * FROM orders ORDER BY created_at DESC');
-        res.json(result.rows);
-    } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-// --- 7. СТРАЙП И ЗАГРУЗКА ---
+// СОЗДАНИЕ СЕССИИ (Фикс для профиля и корзины)
 app.post('/api/create-checkout-session', async (req, res) => {
     try {
-        const { items, customer_id, order_id } = req.body;
+        const { items, order_id, customer_id } = req.body;
         const session = await stripe.checkout.sessions.create({
             payment_method_types: ['card'],
             line_items: items.map(i => ({
@@ -173,19 +65,37 @@ app.post('/api/create-checkout-session', async (req, res) => {
             })),
             mode: 'payment',
             success_url: `https://casehub-final.vercel.app/profile?status=success`,
-            cancel_url: `https://casehub-final.vercel.app/cart?status=cancel`,
-            metadata: { order_id: String(order_id), customer_id: String(customer_id) },
+            cancel_url: `https://casehub-final.vercel.app/profile?status=cancel`,
+            metadata: { order_id: String(order_id), customer_id: String(customer_id) }
         });
         res.json({ url: session.url });
-    } catch (err) { res.status(500).json({ error: err.message }); }
+    } catch (e) { 
+        console.error("Stripe Error:", e.message);
+        res.status(500).json({ error: e.message }); 
+    }
 });
 
-app.post('/api/upload', upload.array('images', 10), (req, res) => {
-    try {
-        const urls = req.files.map(file => `/uploads/${file.filename}`);
-        res.json({ urls });
-    } catch (err) { res.status(500).json({ error: "Ошибка загрузки файла" }); }
+app.post('/api/orders', async (req, res) => {
+    const { customer_id, customer_name, phone, address, items, total_price } = req.body;
+    const result = await pool.query(
+        'INSERT INTO orders (customer_id, customer_name, phone, address, items, total_price, status) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *',
+        [customer_id, customer_name, phone, address, JSON.stringify(items), total_price, 'pending']
+    );
+    res.json(result.rows[0]);
 });
 
-const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => console.log(`🚀 CASEHUB Engine Live on port ${PORT}`));
+app.get('/api/orders/:customer_id', async (req, res) => {
+    const result = await pool.query('SELECT * FROM orders WHERE customer_id = $1 ORDER BY created_at DESC', [req.params.customer_id]);
+    res.json(result.rows);
+});
+
+app.post('/api/auth', async (req, res) => {
+    const { id, username, first_name } = req.body.user;
+    const result = await pool.query(
+        'INSERT INTO users (tg_id, username, first_name) VALUES ($1, $2, $3) ON CONFLICT (tg_id) DO UPDATE SET username = $2 RETURNING *',
+        [id, username, first_name]
+    );
+    res.json(result.rows[0]);
+});
+
+app.listen(process.env.PORT || 5000, () => console.log('🚀 Server 100% Ready'));
