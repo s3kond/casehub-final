@@ -40,9 +40,9 @@ export const Cart = ({ cart, setCart, userProfile, onClose, getImageUrl, API_URL
     (window as any).Telegram?.WebApp?.HapticFeedback?.notificationOccurred('warning');
   };
 
-  // Функция создания заказа (теперь всегда сначала создает запись в БД)
+  // Функция создания заказа
   const createOrder = async (isManual = false) => {
-    if (!userProfile) return alert("Error: Open via Telegram");
+    if (!userProfile?.tg_id) return alert("Error: Please open via Telegram");
     
     const orderData = {
       customer_id: userProfile.tg_id,
@@ -54,37 +54,32 @@ export const Cart = ({ cart, setCart, userProfile, onClose, getImageUrl, API_URL
       total_price: totalPrice,
     };
 
+    console.log("📡 Sending order to:", `${API_URL}/api/orders`);
+
     try {
-      // 1. ВСЕГДА сначала создаем заказ в базе (статус pending)
+      // 1. Создаем запись в базе данных
       const orderRes = await fetch(`${API_URL}/api/orders`, {
         method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json',
-          'ngrok-skip-browser-warning': 'true'
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(orderData)
       });
       
       const createdOrder = await orderRes.json();
-
-      if (!orderRes.ok) throw new Error("Failed to create order");
+      if (!orderRes.ok) throw new Error(createdOrder.error || "Failed to create order");
 
       (window as any).Telegram?.WebApp?.HapticFeedback?.notificationOccurred('success');
 
       if (isManual) {
-        // Если "Pay Later" — очищаем корзину и уходим в профиль
+        // Если "Pay Later" — очищаем корзину и в профиль
         setCart([]);
         if (fetchOrders) await fetchOrders(userProfile.tg_id); 
         onClose();
         navigate('/profile');
       } else {
-        // 2. Если "Pay Now" — берем ID созданного заказа и идем в Stripe
+        // 2. Если "Pay Now" — создаем сессию Stripe
         const stripeRes = await fetch(`${API_URL}/api/create-checkout-session`, {
           method: 'POST',
-          headers: { 
-            'Content-Type': 'application/json',
-            'ngrok-skip-browser-warning': 'true'
-          },
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ ...orderData, order_id: createdOrder.id })
         });
         
@@ -92,12 +87,12 @@ export const Cart = ({ cart, setCart, userProfile, onClose, getImageUrl, API_URL
         if (stripeData.url) {
           window.location.href = stripeData.url;
         } else {
-          alert("Stripe session error");
+          throw new Error(stripeData.error || "Stripe session error");
         }
       }
-    } catch (e) {
-      console.error(e);
-      alert("Order error. Please try again.");
+    } catch (e: any) {
+      console.error("Cart Error:", e);
+      alert("Error: " + e.message);
     }
   };
 
@@ -144,7 +139,7 @@ export const Cart = ({ cart, setCart, userProfile, onClose, getImageUrl, API_URL
 
             {/* DELIVERY FORM */}
             <div className="mt-8 space-y-3 bg-blue-600/5 p-6 rounded-[2.5rem] border border-blue-500/10">
-              <p className="text-[9px] font-black uppercase tracking-[0.2em] text-blue-500 mb-2">Shipment Details</p>
+              <p className="text-[9px] font-black uppercase tracking-[0.2em] text-blue-500 mb-2 px-1">Shipment Details</p>
               <div className="relative">
                 <User className="absolute left-4 top-1/2 -translate-y-1/2 text-zinc-600" size={16}/>
                 <input 
