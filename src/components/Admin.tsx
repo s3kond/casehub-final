@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { Trash2, Edit3, Plus, X, Upload, Phone, MapPin, User, Package, Clock, Smartphone, Box, ExternalLink, Check, Star, ChevronRight, ShoppingBag } from 'lucide-react';
 import { ALL_MODELS, STATUS_OPTIONS, ORDER_STATUSES } from '../constants';
 
@@ -27,6 +27,26 @@ export const AdminPanel = ({ products, setProducts, orders, setOrders, getImageU
     status: 'none' 
   });
 
+  // ФУНКЦИЯ ЗАГРУЗКИ ВСЕХ ЗАКАЗОВ ДЛЯ АДМИНА
+  const fetchAllOrders = async () => {
+    try {
+      console.log("📡 Fetching all orders...");
+      const response = await fetch(`${API_URL}/api/admin/orders`);
+      if (!response.ok) throw new Error("Failed to fetch orders");
+      const data = await response.json();
+      setOrders(data);
+    } catch (err) {
+      console.error("Error loading orders:", err);
+    }
+  };
+
+  // Загружаем заказы при переключении на вкладку
+  useEffect(() => {
+    if (activeTab === 'orders') {
+      fetchAllOrders();
+    }
+  }, [activeTab]);
+
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
@@ -36,7 +56,6 @@ export const AdminPanel = ({ products, setProducts, orders, setOrders, getImageU
     try {
         const res = await fetch(`${API_URL}/api/upload`, { 
           method: 'POST', 
-          headers: { 'ngrok-skip-browser-warning': 'true' },
           body: formData 
         });
         const data = await res.json();
@@ -61,7 +80,7 @@ export const AdminPanel = ({ products, setProducts, orders, setOrders, getImageU
     try {
         const res = await fetch(url, {
             method,
-            headers: { 'Content-Type': 'application/json', 'ngrok-skip-browser-warning': 'true' },
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(productData)
         });
 
@@ -143,7 +162,7 @@ export const AdminPanel = ({ products, setProducts, orders, setOrders, getImageU
                 </div>
                 <div className="flex gap-2">
                   <button onClick={() => { setForm({ id: p.id, name: p.name, price: String(p.price_usd), stock: String(p.stock), images: p.images || [], chinaUrl: p.china_url || '', categories: p.categories || [], status: p.status || 'none' }); window.scrollTo({top: 0, behavior: 'smooth'})}} className="p-3 bg-blue-600/10 text-blue-500 rounded-xl hover:bg-blue-600 hover:text-white transition-all"><Edit3 size={16}/></button>
-                  <button onClick={() => confirm('Delete?') && fetch(`${API_URL}/api/products/${p.id}`, {method:'DELETE', headers: {'ngrok-skip-browser-warning': 'true'}}).then(()=>setProducts(products.filter((x:any)=>x.id!==p.id)))} className="p-3 bg-red-600/10 text-red-600 rounded-xl hover:bg-red-600 hover:text-white transition-all"><Trash2 size={16}/></button>
+                  <button onClick={() => confirm('Delete?') && fetch(`${API_URL}/api/products/${p.id}`, {method:'DELETE'}).then(()=>setProducts(products.filter((x:any)=>x.id!==p.id)))} className="p-3 bg-red-600/10 text-red-600 rounded-xl hover:bg-red-600 hover:text-white transition-all"><Trash2 size={16}/></button>
                 </div>
               </div>
             ))}
@@ -152,7 +171,12 @@ export const AdminPanel = ({ products, setProducts, orders, setOrders, getImageU
       ) : (
         /* ORDERS TAB */
         <div className="space-y-6 animate-in slide-in-from-right duration-500">
-          {orders.map((o: any) => (
+          {orders.length === 0 ? (
+            <div className="text-center py-20 opacity-20">
+              <Package size={48} className="mx-auto mb-4" />
+              <p className="font-black uppercase text-[10px]">No orders yet</p>
+            </div>
+          ) : orders.map((o: any) => (
             <div key={o.id} className="bg-zinc-900/40 rounded-[2.5rem] border border-white/10 p-6 space-y-4 shadow-xl">
               <div className="flex justify-between items-center border-b border-white/5 pb-4">
                 <div className="flex items-center gap-3">
@@ -195,7 +219,7 @@ export const AdminPanel = ({ products, setProducts, orders, setOrders, getImageU
                   onChange={e => {
                     fetch(`${API_URL}/api/orders/${o.id}`, { 
                       method: 'PATCH', 
-                      headers: {'Content-Type': 'application/json', 'ngrok-skip-browser-warning': 'true'}, 
+                      headers: {'Content-Type': 'application/json'}, 
                       body: JSON.stringify({status: e.target.value}) 
                     });
                     setOrders(orders.map((ord: any) => ord.id === o.id ? {...ord, status: e.target.value} : ord));
@@ -229,7 +253,6 @@ export const AdminPanel = ({ products, setProducts, orders, setOrders, getImageU
             <div className="flex-grow overflow-y-auto p-6 space-y-4">
               <p className="text-[10px] font-black text-zinc-500 uppercase tracking-widest ml-2">Ordered Items:</p>
               {(Array.isArray(expandedOrder.items) ? expandedOrder.items : JSON.parse(expandedOrder.items || '[]')).map((item: any, idx: number) => {
-                // ПЫТАЕМСЯ НАЙТИ ТОВАР В ИНВЕНТАРЕ ПО ID ДЛЯ ОТОБРАЖЕНИЯ АКТУАЛЬНЫХ ДАННЫХ
                 const fullProduct = products.find((p: any) => p.id === item.id);
                 
                 return (
