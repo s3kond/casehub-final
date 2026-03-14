@@ -95,15 +95,20 @@ export default function App() {
         setUserProfile(userData);
         if (userData?.tg_id) await fetchOrders(userData.tg_id);
         if (userData?.role === 'admin') await fetchAllOrders();
-      } catch (e) { console.error(userData); }
+      } catch (e) { console.error("Init error:", e); }
       setLoading(false);
     };
     init();
   }, [refreshProducts, fetchOrders, fetchAllOrders]);
 
+  // ФИКС ФОТОГРАФИЙ: Теперь серверные пути склеиваются правильно
   const getImageUrl = (path: string) => {
     if (!path) return 'https://via.placeholder.com/300';
-    return path.startsWith('http') ? path : `${API_URL}${path}`;
+    if (path.startsWith('http')) return path;
+    if (path.startsWith('/uploads')) {
+      return `${API_URL}${path}`;
+    }
+    return path;
   };
 
   if (loading) return <div className="h-screen flex items-center justify-center bg-[#0a0a0a] text-blue-500 font-black animate-pulse uppercase tracking-widest">HUB_LOADING...</div>;
@@ -140,7 +145,7 @@ export default function App() {
                <button onClick={() => { 
                  setCart(prev => [...prev, { ...selectedProduct, quantity: 1 }]); 
                  setSelectedProduct(null); 
-               }} className="w-full bg-blue-600 py-4 rounded-2xl font-black uppercase italic">Add to Cart</button>
+               }} className="w-full bg-blue-600 py-4 rounded-2xl font-black uppercase italic text-white">Add to Cart</button>
             </div>
           </div>
         )}
