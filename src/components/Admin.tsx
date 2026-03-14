@@ -27,20 +27,20 @@ export const AdminPanel = ({ products, setProducts, orders, setOrders, getImageU
     status: 'none' 
   });
 
-  // ФУНКЦИЯ ЗАГРУЗКИ ВСЕХ ЗАКАЗОВ ДЛЯ АДМИНА
+  // --- ФУНКЦИЯ ЗАГРУЗКИ ВСЕХ ЗАКАЗОВ (АДМИН) ---
   const fetchAllOrders = async () => {
     try {
-      console.log("📡 Fetching all orders...");
+      console.log("📡 Fetching all orders from server...");
       const response = await fetch(`${API_URL}/api/admin/orders`);
       if (!response.ok) throw new Error("Failed to fetch orders");
       const data = await response.json();
-      setOrders(data);
+      setOrders(Array.isArray(data) ? data : []);
     } catch (err) {
-      console.error("Error loading orders:", err);
+      console.error("Orders load error:", err);
     }
   };
 
-  // Загружаем заказы при переключении на вкладку
+  // Автоматическая загрузка при переключении вкладки
   useEffect(() => {
     if (activeTab === 'orders') {
       fetchAllOrders();
@@ -106,7 +106,7 @@ export const AdminPanel = ({ products, setProducts, orders, setOrders, getImageU
           {/* PRODUCT FORM */}
           <div className="bg-zinc-900/40 p-8 rounded-[3rem] border border-white/10 space-y-4 shadow-2xl">
             <h3 className="text-blue-500 font-black uppercase italic">{form.id ? 'Edit' : 'New'} Product</h3>
-            <input value={form.name} onChange={e => setForm({...form, name: e.target.value})} placeholder="Product Name" className="w-full bg-black/50 p-4 rounded-2xl border border-white/5 outline-none focus:border-blue-500/50 transition-colors" />
+            <input value={form.name} onChange={e => setForm({...form, name: e.target.value})} placeholder="Product Name" className="w-full bg-black/50 p-4 rounded-2xl border border-white/5 outline-none focus:border-blue-500/50 transition-colors text-white" />
             <div className="grid grid-cols-2 gap-4">
               <input type="number" value={form.price} onChange={e => setForm({...form, price: e.target.value})} placeholder="Price $" className="bg-black/50 p-4 rounded-2xl border border-white/5 outline-none text-blue-400 font-bold" />
               <input type="number" value={form.stock} onChange={e => setForm({...form, stock: e.target.value})} placeholder="Stock" className="bg-black/50 p-4 rounded-2xl border border-white/5 outline-none text-zinc-300 font-bold" />
@@ -152,7 +152,7 @@ export const AdminPanel = ({ products, setProducts, orders, setOrders, getImageU
                 <img src={getImageUrl(p.images?.[0])} className="w-16 h-16 rounded-[1.5rem] object-cover border border-white/5" alt="" />
                 <div className="flex-grow min-w-0">
                   <div className="flex items-center gap-2 mb-1">
-                    <h4 className="text-[11px] font-black uppercase truncate">{p.name}</h4>
+                    <h4 className="text-[11px] font-black uppercase truncate text-white">{p.name}</h4>
                     {p.status && p.status !== 'none' && <span className={`px-2 py-0.5 rounded-md text-[7px] font-black uppercase ${getStatusColor(p.status)}`}>{p.status}</span>}
                   </div>
                   <div className="flex items-center gap-2">
@@ -245,7 +245,7 @@ export const AdminPanel = ({ products, setProducts, orders, setOrders, getImageU
                   <p className="text-[10px] text-zinc-500 font-black uppercase tracking-widest">{expandedOrder.customer_name}</p>
                 </div>
               </div>
-              <button onClick={() => setExpandedOrder(null)} className="p-3 bg-white/5 rounded-full hover:bg-red-500 transition-colors">
+              <button onClick={() => setExpandedOrder(null)} className="p-3 bg-white/5 rounded-full hover:bg-red-500 transition-colors text-white">
                 <X size={20} />
               </button>
             </div>
@@ -263,7 +263,7 @@ export const AdminPanel = ({ products, setProducts, orders, setOrders, getImageU
                       alt="" 
                     />
                     <div className="flex-grow min-w-0">
-                      <p className="text-[11px] font-black uppercase truncate">
+                      <p className="text-[11px] font-black uppercase truncate text-white">
                         {fullProduct?.name || item.name || `Product ID: ${item.id}`}
                       </p>
                       <div className="flex items-center gap-2 mt-1">
@@ -288,11 +288,11 @@ export const AdminPanel = ({ products, setProducts, orders, setOrders, getImageU
             </div>
 
             <div className="p-8 bg-black/40 border-t border-white/5">
-                <div className="flex justify-between items-center mb-2">
+                <div className="flex justify-between items-center mb-2 px-2">
                   <span className="text-zinc-500 text-[10px] font-black uppercase tracking-widest">Customer Total</span>
                   <span className="text-2xl font-black italic text-blue-500">${expandedOrder.total_price}</span>
                 </div>
-                <button onClick={() => setExpandedOrder(null)} className="w-full py-5 bg-zinc-800 rounded-2xl font-black uppercase tracking-widest text-[10px] hover:bg-zinc-700 transition-all mt-4">Close Details</button>
+                <button onClick={() => setExpandedOrder(null)} className="w-full py-5 bg-zinc-800 rounded-2xl font-black uppercase tracking-widest text-[10px] hover:bg-zinc-700 transition-all mt-4 text-white">Close Details</button>
             </div>
           </div>
         </div>
